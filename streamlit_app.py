@@ -18,13 +18,17 @@ def initialize_index_html():
 # Initialize index.html if needed
 initialize_index_html()
 
+# Import system prompt from file
+with open('system_prompt.md', 'r', encoding='utf-8') as f:
+    system_prompt = f.read()
+
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "system", "content": systemPrompt}]
+    st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 
 if "html_version" not in st.session_state:
     st.session_state.html_version = 0
     
-avatar = {'user': '⚡', 'assistant': '🤖'}
+avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
 model = 'gpt-4.1-mini'
 st.logo('img/high-voltage.png')
 
@@ -92,8 +96,9 @@ with st.sidebar:
     messages = st.container(height=450)
     # Display chat history
     for message in st.session_state.chat_history:
-        with messages.chat_message(message["role"], avatar=avatar[message["role"]]):
-            st.write(message["content"])
+        if message["role"] != "system":  # Skip system messages
+            with messages.chat_message(message["role"], avatar=avatar[message["role"]]):
+                st.write(message["content"])
             
     # Process user input
     if prompt:
