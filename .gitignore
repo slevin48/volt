@@ -1,0 +1,4 @@
+env/
+.env
+.streamlit/secrets.toml
+archives/
