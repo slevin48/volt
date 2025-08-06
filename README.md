@@ -1,4 +1,4 @@
-# volt
+# volt [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://letitvibe.streamlit.app/)
 Vibe coding web apps ⚡
 
 Example prompt:
