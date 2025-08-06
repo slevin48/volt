@@ -1,2 +1,5 @@
 streamlit
 openai
+PyJWT
+requests
+coolname

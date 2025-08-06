@@ -1,11 +1,11 @@
 import streamlit as st
-import openai
-import re
-import os
-import shutil
+import openai, re, os, shutil, io, time, uuid, zipfile, jwt, requests, coolname
 
 st.set_page_config(page_title="volt", page_icon="⚡")
 openai.api_key=st.secrets['OPENAI_API_KEY']
+pat = st.secrets['NETLIFY_PAT']
+team_slug = st.secrets['NETLIFY_TEAM_SLUG']
+API_BASE = "https://api.netlify.com/api/v1"
 
 @st.cache_resource
 def initialize_index_html():
@@ -14,6 +14,131 @@ def initialize_index_html():
         shutil.copy2('default_index.html', 'index.html')
         return True
     return False
+
+def http_headers(pat, extra=None):
+    h = {
+        "Authorization": f"Bearer {pat}",
+        "User-Agent": "netlify-e2e-script (oss)",
+    }
+    if extra:
+        h.update(extra)
+    return h
+
+def create_site(pat, team_slug, site_name=None, session_id=None, manage_url=None):
+    session_id = session_id or str(uuid.uuid4())
+    payload = {
+        "account_slug": team_slug,         # put site under your team
+        "created_via": "Volt⚡",          # attribution in Netlify UI
+        "session_id": session_id,          # must match claim JWT later
+    }
+    if site_name:
+        payload["name"] = site_name
+    if manage_url:
+        payload["deploy_origin"] = {
+            "name": "Volt⚡",
+            "deploy_links": [
+                {"url": manage_url, "name": "Manage in tool", "primary": True}
+            ],
+        }
+
+    r = requests.post(f"{API_BASE}/sites",
+                      json=payload,
+                      headers=http_headers(pat, {"Content-Type": "application/json"}))
+    if r.status_code >= 300:
+        raise RuntimeError(f"Create site failed: {r.status_code} {r.text}")
+
+    site = r.json()
+    # Useful fields: id, url, admin_url
+    return site, session_id
+
+def zip_webpage() -> bytes:
+    """
+    Create a zip of index.html and return bytes.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write("index.html")
+    buf.seek(0)
+    return buf.read()
+
+def deploy_zip_zipmethod(pat, site_id, zip_bytes):
+    """
+    ZIP file deploy (official, simple): POST /sites/{site_id}/deploys
+    Content-Type: application/zip, body=zip
+    Returns deploy JSON with id, state, etc.
+    """
+    r = requests.post(
+        f"{API_BASE}/sites/{site_id}/deploys",
+        headers=http_headers(pat, {"Content-Type": "application/zip"}),
+        data=zip_bytes,
+        timeout=120,
+    )
+    if r.status_code >= 300:
+        raise RuntimeError(f"ZIP deploy failed: {r.status_code} {r.text}")
+    return r.json()
+
+def deploy_zip_buildapi(pat, site_id, zip_bytes, title="Initial deploy"):
+    """
+    Build API (multipart form): POST /sites/{site_id}/builds with fields:
+      - title
+      - zip (application/zip)
+    """
+    files = {
+        "zip": ("site.zip", io.BytesIO(zip_bytes), "application/zip"),
+    }
+    data = {"title": title}
+    r = requests.post(
+        f"{API_BASE}/sites/{site_id}/builds",
+        headers=http_headers(pat),
+        files=files,
+        data=data,
+        timeout=120,
+    )
+    if r.status_code >= 300:
+        raise RuntimeError(f"Build API deploy failed: {r.status_code} {r.text}")
+    return r.json()
+
+def poll_deploy_ready(pat, deploy_id, timeout_s=120, interval_s=3):
+    """
+    Poll /deploys/{deploy_id} until state == 'ready' or timeout.
+    """
+    deadline = time.time() + timeout_s
+    last_state = None
+    while time.time() < deadline:
+        r = requests.get(f"{API_BASE}/deploys/{deploy_id}",
+                         headers=http_headers(pat))
+        if r.status_code >= 300:
+            raise RuntimeError(f"Poll deploy failed: {r.status_code} {r.text}")
+        state = r.json().get("state")
+        if state != last_state:
+            print(f"- Deploy state: {state}")
+            last_state = state
+        if state == "ready":
+            return r.json()
+        time.sleep(interval_s)
+    raise TimeoutError("Timed out waiting for deploy to be ready")
+
+def make_claim_link(oauth_client_id, oauth_client_secret, session_id, claim_webhook=None):
+    """
+    Create the signed JWT and produce the claim URL:
+    https://app.netlify.com/claim?utm_source=volt#<jwt>
+
+    The JWT payload requires:
+      - client_id (your Netlify OAuth app client ID)
+      - session_id (must match the one sent when creating the site)
+    Optional:
+      - claim_webhook: URL that Netlify will POST after a successful claim
+    """
+    payload = {
+        "client_id": oauth_client_id,
+        "session_id": session_id,
+    }
+    if claim_webhook:
+        payload["claim_webhook"] = claim_webhook
+
+    token = jwt.encode(payload, oauth_client_secret, algorithm="HS256")
+    claim_url = f"https://app.netlify.com/claim?utm_source=volt#{token}"
+    return claim_url
 
 # Initialize index.html if needed
 initialize_index_html()
@@ -133,6 +258,43 @@ with st.sidebar:
 
 # Main content area for HTML rendering
 with st.container():
+    # Add deployment section at the top right
+    col1, col2, col3 = st.columns([1, 1, 1])
+    # Deploy button on the right
+    with col3:
+        if st.button("🚀 Deploy App", type="primary", use_container_width=True):
+            try:
+                # Set deployment timestamp
+                from datetime import datetime
+                st.session_state.deployment_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                app_name = '-'.join(coolname.generate())
+                site, session_id = create_site(pat, team_slug,site_name=app_name)
+                st.session_state.session_id = session_id
+                st.session_state.site_url = site["url"]
+                st.session_state.last_deployed_app = app_name
+                zip_bytes = zip_webpage()
+                # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
+                deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
+                # Show success toast with link
+                st.toast(f"✅ Deployment successful! View your app at: [{site['url']}]({site['url']})", icon="🎉")
+            except Exception as e:
+                # Show error toast
+                st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
+
+    # Show app name and last deployed time on the left
+    with col1:
+        if "last_deployed_app" in st.session_state:
+            st.markdown(f"**App Name:** [{st.session_state.last_deployed_app}]({st.session_state.site_url})")
+    
+    with col2:
+        if "session_id" in st.session_state:
+            claim_url = make_claim_link(
+            oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
+            oauth_client_secret=st.secrets['NETLIFY_OAUTH_CLIENT_SECRET'],
+            session_id=session_id,
+        )
+            st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
+    
     # Always render the index.html file
     with open('index.html', 'r', encoding='utf-8') as f:
         html_content = f.read()
