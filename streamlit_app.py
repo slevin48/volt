@@ -264,9 +264,6 @@ with st.container():
     with col3:
         if st.button("🚀 Deploy App", type="primary", use_container_width=True):
             try:
-                # Set deployment timestamp
-                from datetime import datetime
-                st.session_state.deployment_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 app_name = '-'.join(coolname.generate())
                 site, session_id = create_site(pat, team_slug,site_name=app_name)
                 st.session_state.session_id = session_id
@@ -281,7 +278,7 @@ with st.container():
                 # Show error toast
                 st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
-    # Show app name and last deployed time on the left
+    # Show app name and claim url on the left
     with col1:
         if "last_deployed_app" in st.session_state:
             st.markdown(f"**App Name:** [{st.session_state.last_deployed_app}]({st.session_state.site_url})")
@@ -298,4 +295,4 @@ with st.container():
     # Always render the index.html file
     with open('index.html', 'r', encoding='utf-8') as f:
         html_content = f.read()
-    st.components.v1.html(html_content, height=500, scrolling=True)
+    st.components.v1.html(html_content, height=480, scrolling=True)

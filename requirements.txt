@@ -1,5 +1,5 @@
-streamlit
-openai
-PyJWT
-requests
-coolname
+streamlit==1.47.1
+openai==1.99.1
+PyJWT==2.10.1
+requests==2.32.4
+coolname==2.2.0
