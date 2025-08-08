@@ -393,7 +393,7 @@ else:
                 claim_url = make_claim_link(
                 oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
                 oauth_client_secret=st.secrets['NETLIFY_OAUTH_CLIENT_SECRET'],
-                session_id=session_id,
+                session_id=st.session_state.session_id,
             )
                 st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
         
