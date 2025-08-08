@@ -1,5 +1,5 @@
 import streamlit as st
-import openai, re, os, shutil, io, time, uuid, zipfile, jwt, requests, coolname
+import openai, re, os, shutil, io, time, uuid, zipfile, jwt, requests, coolname, base64
 
 st.set_page_config(page_title="volt", page_icon="⚡")
 openai.api_key=st.secrets['OPENAI_API_KEY']
@@ -16,9 +16,32 @@ if "chat_history" not in st.session_state:
 
 if "html_version" not in st.session_state:
     st.session_state.html_version = 0
-    
+
+if "app_name" not in st.session_state:
+    st.session_state.app_name = '-'.join(coolname.generate())
+
 avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
 model = 'gpt-4.1-mini'
+AUTH0_DOMAIN = st.secrets["auth"]["domain"]
+
+
+def get_github_token(auth0_user_id: str) -> str | None:
+    mgmt = requests.post(f"https://{AUTH0_DOMAIN}/oauth/token", json={
+    "client_id": st.secrets["auth"]["client_id"],
+    "client_secret": st.secrets["auth"]["client_secret"],
+    "audience": f"https://{AUTH0_DOMAIN}/api/v2/",
+    "grant_type": "client_credentials",
+    }).json()["access_token"]
+    r = requests.get(
+        f"https://{AUTH0_DOMAIN}/api/v2/users/{auth0_user_id}",
+        headers={"Authorization": f"Bearer {mgmt}"},
+        params={"fields": "identities", "include_fields": "true"},
+    )
+    r.raise_for_status()
+    for ident in r.json().get("identities", []):
+        if ident.get("provider") == "github":
+            return ident.get("access_token")
+    return None
 
 @st.cache_resource
 def initialize_index_html():
@@ -27,6 +50,57 @@ def initialize_index_html():
         shutil.copy2('default_index.html', 'index.html')
         return True
     return False
+
+def create_new_repo(token, repo_name):
+    headers = {
+    "Authorization": f"Bearer {token}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+    }
+    r = requests.post("https://api.github.com/user/repos",
+                    json={"name":repo_name,"private":True,"auto_init":True},
+                    headers=headers)
+    repo = r.json()
+    owner, name = repo["owner"]["login"], repo["name"]
+    return owner, name
+
+def push_to_github(token, owner, name, path="index.html", message="Commit from Volt ⚡", version=st.session_state.html_version):
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # 1) Find default branch
+    r = requests.get(f"https://api.github.com/repos/{owner}/{name}", headers=headers)
+    r.raise_for_status()
+    branch = r.json().get("default_branch", "main")
+
+    # 2) Read & encode content
+    with open(path, "rb") as f:
+        content = base64.b64encode(f.read()).decode("utf-8")
+
+    url = f"https://api.github.com/repos/{owner}/{name}/contents/{path}"
+
+    # 3) See if the file already exists (to get its sha)
+    stat = requests.get(url, headers=headers, params={"ref": branch})
+
+    payload = {"message": message + f" version {version}", "content": content, "branch": branch}
+    if stat.status_code == 200:
+        payload["sha"] = stat.json()["sha"]  # required to update
+    elif stat.status_code == 404:
+        pass  # creating new file on this branch
+    else:
+        # Helpful when debugging 422 and others
+        raise requests.HTTPError(f"Stat failed: {stat.status_code} {stat.text}")
+
+    put = requests.put(url, json=payload, headers=headers)
+    try:
+        put.raise_for_status()
+    except requests.HTTPError:
+        # Print server's error details (e.g. "No commit found for the ref", "sha wasn't supplied")
+        print(put.text)
+        raise
 
 def http_headers(pat, extra=None):
     h = {
@@ -214,6 +288,7 @@ def agent(chat_history, model=model):
 # Initialize index.html if needed
 initialize_index_html()
 
+
 st.logo('img/high-voltage.png')
 
 
@@ -276,22 +351,29 @@ else:
         st.image(st.user.picture, width=50)
         st.button("Logout", on_click=st.logout)
 
-        # if st.toggle("Debug", value=False):
-        #     st.write(st.session_state.chat_history)
-
+        if st.toggle("Debug", value=False):
+            # st.write(st.session_state.chat_history)
+            st.write(st.user)
     # Main content area for HTML rendering
     with st.container():
         # Add deployment section at the top right
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2, col3 = st.columns([1, 2, 1])
         # Deploy button on the right
+        with col1:
+            if st.button("🐙 Push to GitHub", use_container_width=True):
+                GH_TOKEN = get_github_token(st.user.sub)
+                try:
+                    create_new_repo(GH_TOKEN, st.session_state.app_name)
+                except Exception as e:
+                    print(f"Error pushing to GitHub: {e}")
+                finally:
+                    push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
         with col3:
             if st.button("🚀 Deploy App", type="primary", use_container_width=True):
                 try:
-                    app_name = '-'.join(coolname.generate())
-                    site, session_id = create_site(pat, team_slug,site_name=app_name)
+                    site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
                     st.session_state.session_id = session_id
                     st.session_state.site_url = site["url"]
-                    st.session_state.last_deployed_app = app_name
                     zip_bytes = zip_webpage()
                     # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
                     deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
@@ -302,11 +384,11 @@ else:
                     st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
         # Show app name and claim url on the left
-        with col1:
-            if "last_deployed_app" in st.session_state:
-                st.markdown(f"**App Name:** [{st.session_state.last_deployed_app}]({st.session_state.site_url})")
-        
         with col2:
+            if "site_url" in st.session_state:
+                st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
+            else:
+                st.markdown(f"**App Name:** {st.session_state.app_name}")
             if "session_id" in st.session_state:
                 claim_url = make_claim_link(
                 oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
