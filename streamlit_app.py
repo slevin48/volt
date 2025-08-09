@@ -11,19 +11,7 @@ API_BASE = "https://api.netlify.com/api/v1"
 with open('system_prompt.md', 'r', encoding='utf-8') as f:
     system_prompt = f.read()
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
-
-if "html_version" not in st.session_state:
-    st.session_state.html_version = 0
-
-if "app_name" not in st.session_state:
-    st.session_state.app_name = '-'.join(coolname.generate())
-
-avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
-model = 'gpt-4.1-mini'
-AUTH0_DOMAIN = st.secrets["auth"]["domain"]
-
+# Function to load default HTML content
 def load_default_html() -> str:
     try:
         with open('default_index.html', 'r', encoding='utf-8') as f:
@@ -31,6 +19,20 @@ def load_default_html() -> str:
     except FileNotFoundError:
         # tiny safe fallback if file is missing
         return """<!doctype html><html><head><meta charset=\"utf-8\"><title>Welcome</title></head>\n<body><h1>Here Be Dragons 🐉</h1><p>Ask me to generate some HTML!</p></body></html>"""
+
+# Initialize session state variables
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
+if "html_version" not in st.session_state:
+    st.session_state.html_version = 0
+if "app_name" not in st.session_state:
+    st.session_state.app_name = '-'.join(coolname.generate())
+if "html" not in st.session_state:
+    st.session_state.html = load_default_html()
+
+avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
+model = 'gpt-4.1-mini'
+AUTH0_DOMAIN = st.secrets["auth"]["domain"]
 
 def zip_from_html_str(html_str: str) -> bytes:
     buf = io.BytesIO()
