@@ -342,18 +342,18 @@ with st.sidebar:
 
     st.text_input("App Name", value=st.session_state.app_name, key="app_name", on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
     
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        # Add reset button at the bottom of the sidebar
-        if st.button("New App", type="primary", use_container_width=True):
-            st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
-            st.session_state.html_version = 0
-            st.session_state.html = load_default_html()
-            st.rerun()
-    with col2:
+    # col1, col2 = st.columns([1, 1])
+    # with col1:
+    # Add reset button at the bottom of the sidebar
+    if st.button("New App", type="primary", use_container_width=True):
+        st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
+        st.session_state.html_version = 0
+        st.session_state.html = load_default_html()
+        st.rerun()
+    # with col2:
         # st.write(f"Welcome, {st.user.name}! 👋")
         # st.image(st.user.picture, width=50)
-        st.button("Logout", on_click=st.logout, use_container_width=True)
+        # st.button("Logout", on_click=st.logout, use_container_width=True)
 
     # if st.toggle("Debug", value=False):
     #     st.write(st.session_state.chat_history)
@@ -361,18 +361,18 @@ with st.sidebar:
 # Main content area for HTML rendering
 with st.container():
     # Add deployment section at the top right
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2 = st.columns([3, 1])
     # Deploy button on the right
-    with col1:
-        if st.button("🐙 Push to GitHub", use_container_width=True):
-            GH_TOKEN = get_github_token(st.user.sub)
-            try:
-                create_new_repo(GH_TOKEN, st.session_state.app_name)
-            except Exception as e:
-                print(f"Error pushing to GitHub: {e}")
-            finally:
-                push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
-    with col3:
+    # with col1:
+    #     if st.button("🐙 Push to GitHub", use_container_width=True):
+    #         GH_TOKEN = get_github_token(st.user.sub)
+    #         try:
+    #             create_new_repo(GH_TOKEN, st.session_state.app_name)
+    #         except Exception as e:
+    #             print(f"Error pushing to GitHub: {e}")
+    #         finally:
+    #             push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
+    with col2:
         if st.button("🚀 Deploy App", type="primary", use_container_width=True):
             try:
                 site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
@@ -388,7 +388,7 @@ with st.container():
                 st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
     # Show app name and claim url on the left
-    with col2:
+    with col1:
         if "site_url" in st.session_state:
             st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
         else:
