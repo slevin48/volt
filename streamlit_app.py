@@ -31,7 +31,7 @@ if "html" not in st.session_state:
     st.session_state.html = load_default_html()
 
 avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
-model = 'gpt-4.1-mini'
+model = 'gpt-5-nano'
 AUTH0_DOMAIN = st.secrets["auth"]["domain"]
 
 def zip_from_html_str(html_str: str) -> bytes:
@@ -267,28 +267,18 @@ def contains_html(text):
     return any(re.search(pattern, text, re.IGNORECASE | re.DOTALL) for pattern in html_patterns)
 
 
-def agent(chat_history, model=model):
+def chat_stream(chat_history, model=model):
     """Function to call the OpenAI API and handle streaming responses"""
-    response = openai.chat.completions.create(
-        model=model,        
-        messages=chat_history,
-        stream=True  # Enable streaming
-    )
-    report = []
-    res_box = st.empty()
-    
-    # Iterate through the streaming response
-    for chunk in response:
-        if chunk.choices[0].finish_reason is None:
-            # Get the delta content and append it
-            report.append(chunk.choices[0].delta.content)
-            # Join all pieces and strip whitespace
-            result = ''.join(report).strip()
-            # Update the Streamlit component with the latest text
-            res_box.write(result)
-    
-    # Return the complete response
-    return result
+    stream = openai.chat.completions.create(
+            model=model,
+            messages=chat_history,
+            stream=True,
+        )
+    for event in stream:
+        delta = event.choices[0].delta
+        if delta and delta.content:
+            # yield raw tokens (preserve newlines/markdown)
+            yield delta.content
 
 
 st.logo('img/high-voltage.png')
@@ -328,7 +318,7 @@ with st.sidebar:
         # Append user message to chat history
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         with messages.chat_message("assistant", avatar=avatar["assistant"]):
-            response = agent(st.session_state.chat_history)
+            response = st.write_stream(chat_stream(st.session_state.chat_history))
         # Append assistant response to chat history
         st.session_state.chat_history.append({"role": "assistant", "content": response})
         # Check for HTML content and update in-memory state if found
