@@ -7,13 +7,20 @@ pat = st.secrets['NETLIFY_PAT']
 team_slug = st.secrets['NETLIFY_TEAM_SLUG']
 API_BASE = "https://api.netlify.com/api/v1"
 
-@st.cache_resource
-def initialize_index_html():
-    """Initialize index.html from default template once per session"""
-    if os.path.exists('default_index.html'):
-        shutil.copy2('default_index.html', 'index.html')
-        return True
-    return False
+
+# --- INIT (replace initialize_index_html + index.html file use) ---
+def load_default_html() -> str:
+    try:
+        with open('default_index.html', 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        # tiny safe fallback if file is missing
+        return """<!doctype html><html><head><meta charset=\"utf-8\"><title>Welcome</title></head>\n<body><h1>Here Be Dragons 🐉</h1><p>Ask me to generate some HTML!</p></body></html>"""
+
+if "html" not in st.session_state:
+    st.session_state.html = load_default_html()
+if "html_version" not in st.session_state:
+    st.session_state.html_version = 0
 
 def http_headers(pat, extra=None):
     h = {
@@ -51,13 +58,10 @@ def create_site(pat, team_slug, site_name=None, session_id=None, manage_url=None
     # Useful fields: id, url, admin_url
     return site, session_id
 
-def zip_webpage() -> bytes:
-    """
-    Create a zip of index.html and return bytes.
-    """
+def zip_from_html_str(html_str: str) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.write("index.html")
+        zf.writestr("index.html", html_str)  # in-memory file
     buf.seek(0)
     return buf.read()
 
@@ -140,8 +144,7 @@ def make_claim_link(oauth_client_id, oauth_client_secret, session_id, claim_webh
     claim_url = f"https://app.netlify.com/claim?utm_source=volt#{token}"
     return claim_url
 
-# Initialize index.html if needed
-initialize_index_html()
+# No longer need to initialize index.html; HTML is managed in session state
 
 # Import system prompt from file
 with open('system_prompt.md', 'r', encoding='utf-8') as f:
@@ -187,9 +190,8 @@ def contains_html(text):
     ]
     return any(re.search(pattern, text, re.IGNORECASE | re.DOTALL) for pattern in html_patterns)
 
-def update_html_file(html_content):
-    with open('index.html', 'w', encoding='utf-8') as f:
-        f.write(html_content)
+def update_html_state(html_content: str):
+    st.session_state.html = html_content
     st.session_state.html_version += 1
 
 def agent(chat_history, model=model):
@@ -238,19 +240,15 @@ with st.sidebar:
         # Check for HTML content and update file if found
         html_content = extract_html_from_markdown(response)
         if html_content:
-            print("Found HTML content, updating file...")  # Debug print
-            update_html_file(html_content)
+            print("Found HTML content, updating in-memory state...")  # Debug print
+            update_html_state(html_content)
         st.write(f"HTML Version: {st.session_state.html_version}")
     
     # Add reset button at the bottom of the sidebar
     if st.button("New App", type="primary"):
-        # Clear the chat history
-        st.session_state.chat_history = []
+        st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
         st.session_state.html_version = 0
-        # Clear the cache
-        st.cache_resource.clear()
-        # Reinitialize index.html
-        initialize_index_html()
+        st.session_state.html = load_default_html()
         st.rerun()
 
     if st.checkbox("Debug", value=False):
@@ -269,7 +267,7 @@ with st.container():
                 st.session_state.session_id = session_id
                 st.session_state.site_url = site["url"]
                 st.session_state.last_deployed_app = app_name
-                zip_bytes = zip_webpage()
+                zip_bytes = zip_from_html_str(st.session_state.html)
                 # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
                 deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
                 # Show success toast with link
@@ -292,7 +290,6 @@ with st.container():
         )
             st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
     
-    # Always render the index.html file
-    with open('index.html', 'r', encoding='utf-8') as f:
-        html_content = f.read()
+    # Always render the HTML from session state
+    st.components.v1.html(st.session_state.html, height=480, scrolling=True)
     st.components.v1.html(html_content, height=480, scrolling=True)
