@@ -1,5 +1,5 @@
 import streamlit as st
-import openai, re, os, shutil, io, time, uuid, zipfile, jwt, requests, coolname, base64
+import openai, re, io, time, uuid, zipfile, jwt, requests, coolname, base64
 
 st.set_page_config(page_title="volt", page_icon="⚡")
 openai.api_key=st.secrets['OPENAI_API_KEY']
@@ -31,7 +31,7 @@ if "html" not in st.session_state:
     st.session_state.html = load_default_html()
 
 avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
-model = 'gpt-4.1-mini'
+model = 'gpt-5'
 AUTH0_DOMAIN = st.secrets["auth"]["domain"]
 
 def zip_from_html_str(html_str: str) -> bytes:
@@ -307,8 +307,8 @@ if not st.user.is_logged_in:
         st.markdown("[Space Invaders](https://spaceinvaders.vibecoders.studio/)")
         st.image('img/spaceinvaders.png', use_container_width =True)
     with col3:
-        st.markdown("[French Learning](https://french.vibecoders.studio/)")
-        st.image('img/frenchlearning.png', use_container_width =True)
+        st.markdown("[Plop](https://plop.vibecoders.studio/)")
+        st.image('img/plop.png', use_container_width =True)
 else:
         
     # Sidebar for chat interface
