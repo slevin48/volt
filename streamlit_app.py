@@ -350,9 +350,9 @@ else:
         st.image(st.user.picture, width=50)
         st.button("Logout", on_click=st.logout)
 
-        if st.toggle("Debug", value=False):
-            # st.write(st.session_state.chat_history)
-            st.write(st.user)
+        # if st.toggle("Debug", value=False):
+        #     st.write(st.session_state.chat_history)
+        #     st.write(st.user)
     # Main content area for HTML rendering
     with st.container():
         # Add deployment section at the top right
