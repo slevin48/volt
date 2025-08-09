@@ -24,6 +24,20 @@ avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
 model = 'gpt-4.1-mini'
 AUTH0_DOMAIN = st.secrets["auth"]["domain"]
 
+def load_default_html() -> str:
+    try:
+        with open('default_index.html', 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        # tiny safe fallback if file is missing
+        return """<!doctype html><html><head><meta charset=\"utf-8\"><title>Welcome</title></head>\n<body><h1>Here Be Dragons 🐉</h1><p>Ask me to generate some HTML!</p></body></html>"""
+
+def zip_from_html_str(html_str: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("index.html", html_str)  # in-memory file
+    buf.seek(0)
+    return buf.read()
 
 def get_github_token(auth0_user_id: str) -> str | None:
     mgmt = requests.post(f"https://{AUTH0_DOMAIN}/oauth/token", json={
@@ -43,13 +57,6 @@ def get_github_token(auth0_user_id: str) -> str | None:
             return ident.get("access_token")
     return None
 
-@st.cache_resource
-def initialize_index_html():
-    """Initialize index.html from default template once per session"""
-    if os.path.exists('default_index.html'):
-        shutil.copy2('default_index.html', 'index.html')
-        return True
-    return False
 
 def create_new_repo(token, repo_name):
     headers = {
@@ -64,7 +71,7 @@ def create_new_repo(token, repo_name):
     owner, name = repo["owner"]["login"], repo["name"]
     return owner, name
 
-def push_to_github(token, owner, name, path="index.html", message="Commit from Volt ⚡", version=st.session_state.html_version):
+def push_to_github(token, owner, name, message="Commit from Volt ⚡", version=st.session_state.html_version):
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -76,11 +83,11 @@ def push_to_github(token, owner, name, path="index.html", message="Commit from V
     r.raise_for_status()
     branch = r.json().get("default_branch", "main")
 
-    # 2) Read & encode content
-    with open(path, "rb") as f:
-        content = base64.b64encode(f.read()).decode("utf-8")
+    # 2) Read & encode content from in-memory HTML
+    html_bytes = st.session_state.html.encode("utf-8")
+    content = base64.b64encode(html_bytes).decode("utf-8")
 
-    url = f"https://api.github.com/repos/{owner}/{name}/contents/{path}"
+    url = f"https://api.github.com/repos/{owner}/{name}/contents/index.html"
 
     # 3) See if the file already exists (to get its sha)
     stat = requests.get(url, headers=headers, params={"ref": branch})
@@ -257,10 +264,6 @@ def contains_html(text):
     ]
     return any(re.search(pattern, text, re.IGNORECASE | re.DOTALL) for pattern in html_patterns)
 
-def update_html_file(html_content):
-    with open('index.html', 'w', encoding='utf-8') as f:
-        f.write(html_content)
-    st.session_state.html_version += 1
 
 def agent(chat_history, model=model):
     """Function to call the OpenAI API and handle streaming responses"""
@@ -284,9 +287,6 @@ def agent(chat_history, model=model):
     
     # Return the complete response
     return result
-
-# Initialize index.html if needed
-initialize_index_html()
 
 
 st.logo('img/high-voltage.png')
@@ -329,22 +329,19 @@ else:
                 response = agent(st.session_state.chat_history)
             # Append assistant response to chat history
             st.session_state.chat_history.append({"role": "assistant", "content": response})
-            # Check for HTML content and update file if found
+            # Check for HTML content and update in-memory state if found
             html_content = extract_html_from_markdown(response)
             if html_content:
-                print("Found HTML content, updating file...")  # Debug print
-                update_html_file(html_content)
+                print("Found HTML content, updating in-memory state...")  # Debug print
+                st.session_state.html = html_content
+                st.session_state.html_version += 1
             st.write(f"HTML Version: {st.session_state.html_version}")
         
         # Add reset button at the bottom of the sidebar
         if st.button("New App", type="primary"):
-            # Clear the chat history
-            st.session_state.chat_history = []
+            st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
             st.session_state.html_version = 0
-            # Clear the cache
-            st.cache_resource.clear()
-            # Reinitialize index.html
-            initialize_index_html()
+            st.session_state.html = load_default_html()
             st.rerun()
 
         st.write(f"Welcome, {st.user.name}! 👋")
@@ -374,7 +371,7 @@ else:
                     site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
                     st.session_state.session_id = session_id
                     st.session_state.site_url = site["url"]
-                    zip_bytes = zip_webpage()
+                    zip_bytes = zip_from_html_str(st.session_state.html)
                     # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
                     deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
                     # Show success toast with link
@@ -397,7 +394,5 @@ else:
             )
                 st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
         
-        # Always render the index.html file
-        with open('index.html', 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        st.components.v1.html(html_content, height=480, scrolling=True)
+    # Always render the HTML from session state
+    st.components.v1.html(st.session_state.html, height=480, scrolling=True)
