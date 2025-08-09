@@ -7,8 +7,7 @@ pat = st.secrets['NETLIFY_PAT']
 team_slug = st.secrets['NETLIFY_TEAM_SLUG']
 API_BASE = "https://api.netlify.com/api/v1"
 
-
-# --- INIT (replace initialize_index_html + index.html file use) ---
+# Function to load default HTML content from a file
 def load_default_html() -> str:
     try:
         with open('default_index.html', 'r', encoding='utf-8') as f:
@@ -143,8 +142,6 @@ def make_claim_link(oauth_client_id, oauth_client_secret, session_id, claim_webh
     token = jwt.encode(payload, oauth_client_secret, algorithm="HS256")
     claim_url = f"https://app.netlify.com/claim?utm_source=volt#{token}"
     return claim_url
-
-# No longer need to initialize index.html; HTML is managed in session state
 
 # Import system prompt from file
 with open('system_prompt.md', 'r', encoding='utf-8') as f:
@@ -292,4 +289,3 @@ with st.container():
     
     # Always render the HTML from session state
     st.components.v1.html(st.session_state.html, height=480, scrolling=True)
-    st.components.v1.html(html_content, height=480, scrolling=True)
