@@ -1,5 +1,5 @@
 import streamlit as st
-import openai, re, os, shutil, io, time, uuid, zipfile, jwt, requests, coolname
+import openai, re, os, shutil, io, time, uuid, zipfile, jwt, requests, coolname, base64
 
 st.set_page_config(page_title="volt", page_icon="⚡")
 openai.api_key=st.secrets['OPENAI_API_KEY']
@@ -7,7 +7,11 @@ pat = st.secrets['NETLIFY_PAT']
 team_slug = st.secrets['NETLIFY_TEAM_SLUG']
 API_BASE = "https://api.netlify.com/api/v1"
 
-# Function to load default HTML content from a file
+# Import system prompt from file
+with open('system_prompt.md', 'r', encoding='utf-8') as f:
+    system_prompt = f.read()
+
+# Function to load default HTML content
 def load_default_html() -> str:
     try:
         with open('default_index.html', 'r', encoding='utf-8') as f:
@@ -16,10 +20,96 @@ def load_default_html() -> str:
         # tiny safe fallback if file is missing
         return """<!doctype html><html><head><meta charset=\"utf-8\"><title>Welcome</title></head>\n<body><h1>Here Be Dragons 🐉</h1><p>Ask me to generate some HTML!</p></body></html>"""
 
-if "html" not in st.session_state:
-    st.session_state.html = load_default_html()
+# Initialize session state variables
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
 if "html_version" not in st.session_state:
     st.session_state.html_version = 0
+if "app_name" not in st.session_state:
+    st.session_state.app_name = '-'.join(coolname.generate())
+if "html" not in st.session_state:
+    st.session_state.html = load_default_html()
+
+avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
+model = 'gpt-4.1-mini'
+AUTH0_DOMAIN = st.secrets["auth"]["domain"]
+
+def zip_from_html_str(html_str: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("index.html", html_str)  # in-memory file
+    buf.seek(0)
+    return buf.read()
+
+def get_github_token(auth0_user_id: str) -> str | None:
+    mgmt = requests.post(f"https://{AUTH0_DOMAIN}/oauth/token", json={
+    "client_id": st.secrets["auth"]["client_id"],
+    "client_secret": st.secrets["auth"]["client_secret"],
+    "audience": f"https://{AUTH0_DOMAIN}/api/v2/",
+    "grant_type": "client_credentials",
+    }).json()["access_token"]
+    r = requests.get(
+        f"https://{AUTH0_DOMAIN}/api/v2/users/{auth0_user_id}",
+        headers={"Authorization": f"Bearer {mgmt}"},
+        params={"fields": "identities", "include_fields": "true"},
+    )
+    r.raise_for_status()
+    for ident in r.json().get("identities", []):
+        if ident.get("provider") == "github":
+            return ident.get("access_token")
+    return None
+
+
+def create_new_repo(token, repo_name):
+    headers = {
+    "Authorization": f"Bearer {token}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+    }
+    r = requests.post("https://api.github.com/user/repos",
+                    json={"name":repo_name,"private":True,"auto_init":True},
+                    headers=headers)
+    repo = r.json()
+    owner, name = repo["owner"]["login"], repo["name"]
+    return owner, name
+
+def push_to_github(token, owner, name, message="Commit from Volt ⚡", version=st.session_state.html_version):
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # 1) Find default branch
+    r = requests.get(f"https://api.github.com/repos/{owner}/{name}", headers=headers)
+    r.raise_for_status()
+    branch = r.json().get("default_branch", "main")
+
+    # 2) Read & encode content from in-memory HTML
+    html_bytes = st.session_state.html.encode("utf-8")
+    content = base64.b64encode(html_bytes).decode("utf-8")
+
+    url = f"https://api.github.com/repos/{owner}/{name}/contents/index.html"
+
+    # 3) See if the file already exists (to get its sha)
+    stat = requests.get(url, headers=headers, params={"ref": branch})
+
+    payload = {"message": message + f" version {version}", "content": content, "branch": branch}
+    if stat.status_code == 200:
+        payload["sha"] = stat.json()["sha"]  # required to update
+    elif stat.status_code == 404:
+        pass  # creating new file on this branch
+    else:
+        # Helpful when debugging 422 and others
+        raise requests.HTTPError(f"Stat failed: {stat.status_code} {stat.text}")
+
+    put = requests.put(url, json=payload, headers=headers)
+    try:
+        put.raise_for_status()
+    except requests.HTTPError:
+        # Print server's error details (e.g. "No commit found for the ref", "sha wasn't supplied")
+        print(put.text)
+        raise
 
 def http_headers(pat, extra=None):
     h = {
@@ -57,10 +147,13 @@ def create_site(pat, team_slug, site_name=None, session_id=None, manage_url=None
     # Useful fields: id, url, admin_url
     return site, session_id
 
-def zip_from_html_str(html_str: str) -> bytes:
+def zip_webpage() -> bytes:
+    """
+    Create a zip of index.html and return bytes.
+    """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("index.html", html_str)  # in-memory file
+        zf.write("index.html")
     buf.seek(0)
     return buf.read()
 
@@ -143,20 +236,6 @@ def make_claim_link(oauth_client_id, oauth_client_secret, session_id, claim_webh
     claim_url = f"https://app.netlify.com/claim?utm_source=volt#{token}"
     return claim_url
 
-# Import system prompt from file
-with open('system_prompt.md', 'r', encoding='utf-8') as f:
-    system_prompt = f.read()
-
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
-
-if "html_version" not in st.session_state:
-    st.session_state.html_version = 0
-    
-avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
-model = 'gpt-4.1-mini'
-st.logo('img/high-voltage.png')
-
 def extract_html_from_markdown(text):
     # Look for content between any type of code block markers
     patterns = [
@@ -187,9 +266,6 @@ def contains_html(text):
     ]
     return any(re.search(pattern, text, re.IGNORECASE | re.DOTALL) for pattern in html_patterns)
 
-def update_html_state(html_content: str):
-    st.session_state.html = html_content
-    st.session_state.html_version += 1
 
 def agent(chat_history, model=model):
     """Function to call the OpenAI API and handle streaming responses"""
@@ -214,6 +290,27 @@ def agent(chat_history, model=model):
     # Return the complete response
     return result
 
+
+st.logo('img/high-voltage.png')
+
+
+# if not st.user.is_logged_in:
+#     st.title("⚡ volt")
+#     st.write("Welcome to **volt**! Please authenticate to start using the app.")
+#     st.button("Authenticate", on_click=st.login,type="primary")
+#     st.write("Made with ❤️ by Volt⚡")
+#     col1,col2,col3 = st.columns([1, 1, 1])
+#     with col1:
+#         st.markdown("[Calculator](https://calculator.vibecoders.studio/)")
+#         st.image('img/calculator.png', use_container_width =True)
+#     with col2:
+#         st.markdown("[Space Invaders](https://spaceinvaders.vibecoders.studio/)")
+#         st.image('img/spaceinvaders.png', use_container_width =True)
+#     with col3:
+#         st.markdown("[French Learning](https://french.vibecoders.studio/)")
+#         st.image('img/frenchlearning.png', use_container_width =True)
+# else:
+    
 # Sidebar for chat interface
 with st.sidebar:
     prompt = st.chat_input("Enter your message here", key="chat_input")
@@ -234,36 +331,53 @@ with st.sidebar:
             response = agent(st.session_state.chat_history)
         # Append assistant response to chat history
         st.session_state.chat_history.append({"role": "assistant", "content": response})
-        # Check for HTML content and update file if found
+        # Check for HTML content and update in-memory state if found
         html_content = extract_html_from_markdown(response)
         if html_content:
             print("Found HTML content, updating in-memory state...")  # Debug print
-            update_html_state(html_content)
+            st.session_state.html = html_content
+            st.session_state.html_version += 1
         st.write(f"HTML Version: {st.session_state.html_version}")
     
-    # Add reset button at the bottom of the sidebar
-    if st.button("New App", type="primary"):
-        st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
-        st.session_state.html_version = 0
-        st.session_state.html = load_default_html()
-        st.rerun()
 
-    if st.checkbox("Debug", value=False):
-        st.write(st.session_state.chat_history)
+    st.text_input("App Name", value=st.session_state.app_name, key="app_name", on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        # Add reset button at the bottom of the sidebar
+        if st.button("New App", type="primary", use_container_width=True):
+            st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
+            st.session_state.html_version = 0
+            st.session_state.html = load_default_html()
+            st.rerun()
+    with col2:
+        # st.write(f"Welcome, {st.user.name}! 👋")
+        # st.image(st.user.picture, width=50)
+        st.button("Logout", on_click=st.logout, use_container_width=True)
 
+    # if st.toggle("Debug", value=False):
+    #     st.write(st.session_state.chat_history)
+    #     st.write(st.user)
 # Main content area for HTML rendering
 with st.container():
     # Add deployment section at the top right
-    col1, col2, col3 = st.columns([1, 1, 1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     # Deploy button on the right
+    with col1:
+        if st.button("🐙 Push to GitHub", use_container_width=True):
+            GH_TOKEN = get_github_token(st.user.sub)
+            try:
+                create_new_repo(GH_TOKEN, st.session_state.app_name)
+            except Exception as e:
+                print(f"Error pushing to GitHub: {e}")
+            finally:
+                push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
     with col3:
         if st.button("🚀 Deploy App", type="primary", use_container_width=True):
             try:
-                app_name = '-'.join(coolname.generate())
-                site, session_id = create_site(pat, team_slug,site_name=app_name)
+                site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
                 st.session_state.session_id = session_id
                 st.session_state.site_url = site["url"]
-                st.session_state.last_deployed_app = app_name
                 zip_bytes = zip_from_html_str(st.session_state.html)
                 # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
                 deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
@@ -274,18 +388,18 @@ with st.container():
                 st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
     # Show app name and claim url on the left
-    with col1:
-        if "last_deployed_app" in st.session_state:
-            st.markdown(f"**App Name:** [{st.session_state.last_deployed_app}]({st.session_state.site_url})")
-    
     with col2:
+        if "site_url" in st.session_state:
+            st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
+        else:
+            st.markdown(f"**App Name:** {st.session_state.app_name}")
         if "session_id" in st.session_state:
             claim_url = make_claim_link(
             oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
             oauth_client_secret=st.secrets['NETLIFY_OAUTH_CLIENT_SECRET'],
-            session_id=session_id,
+            session_id=st.session_state.session_id,
         )
             st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
     
-    # Always render the HTML from session state
-    st.components.v1.html(st.session_state.html, height=480, scrolling=True)
+# Always render the HTML from session state
+st.components.v1.html(st.session_state.html, height=480, scrolling=True)
