@@ -294,107 +294,112 @@ def agent(chat_history, model=model):
 st.logo('img/high-voltage.png')
 
 
-if not st.user.is_logged_in:
-    st.title("⚡ volt")
-    st.write("Welcome to **volt**! Please authenticate to start using the app.")
-    st.button("Authenticate", on_click=st.login,type="primary")
-    st.write("Made with ❤️ by Volt⚡")
-    col1,col2,col3 = st.columns([1, 1, 1])
+# if not st.user.is_logged_in:
+#     st.title("⚡ volt")
+#     st.write("Welcome to **volt**! Please authenticate to start using the app.")
+#     st.button("Authenticate", on_click=st.login,type="primary")
+#     st.write("Made with ❤️ by Volt⚡")
+#     col1,col2,col3 = st.columns([1, 1, 1])
+#     with col1:
+#         st.markdown("[Calculator](https://calculator.vibecoders.studio/)")
+#         st.image('img/calculator.png', use_container_width =True)
+#     with col2:
+#         st.markdown("[Space Invaders](https://spaceinvaders.vibecoders.studio/)")
+#         st.image('img/spaceinvaders.png', use_container_width =True)
+#     with col3:
+#         st.markdown("[French Learning](https://french.vibecoders.studio/)")
+#         st.image('img/frenchlearning.png', use_container_width =True)
+# else:
+    
+# Sidebar for chat interface
+with st.sidebar:
+    prompt = st.chat_input("Enter your message here", key="chat_input")
+    messages = st.container(height=450)
+    # Display chat history
+    for message in st.session_state.chat_history:
+        if message["role"] != "system":  # Skip system messages
+            with messages.chat_message(message["role"], avatar=avatar[message["role"]]):
+                st.write(message["content"])
+            
+    # Process user input
+    if prompt:
+        with messages.chat_message("user", avatar=avatar["user"]):
+            st.write(prompt)
+        # Append user message to chat history
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with messages.chat_message("assistant", avatar=avatar["assistant"]):
+            response = agent(st.session_state.chat_history)
+        # Append assistant response to chat history
+        st.session_state.chat_history.append({"role": "assistant", "content": response})
+        # Check for HTML content and update in-memory state if found
+        html_content = extract_html_from_markdown(response)
+        if html_content:
+            print("Found HTML content, updating in-memory state...")  # Debug print
+            st.session_state.html = html_content
+            st.session_state.html_version += 1
+        st.write(f"HTML Version: {st.session_state.html_version}")
+    
+
+    st.text_input("App Name", value=st.session_state.app_name, key="app_name", on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
+    
+    col1, col2 = st.columns([1, 1])
     with col1:
-        st.markdown("[Calculator](https://calculator.vibecoders.studio/)")
-        st.image('img/calculator.png', use_container_width =True)
-    with col2:
-        st.markdown("[Space Invaders](https://spaceinvaders.vibecoders.studio/)")
-        st.image('img/spaceinvaders.png', use_container_width =True)
-    with col3:
-        st.markdown("[French Learning](https://french.vibecoders.studio/)")
-        st.image('img/frenchlearning.png', use_container_width =True)
-else:
-        
-    # Sidebar for chat interface
-    with st.sidebar:
-        prompt = st.chat_input("Enter your message here", key="chat_input")
-        messages = st.container(height=450)
-        # Display chat history
-        for message in st.session_state.chat_history:
-            if message["role"] != "system":  # Skip system messages
-                with messages.chat_message(message["role"], avatar=avatar[message["role"]]):
-                    st.write(message["content"])
-                
-        # Process user input
-        if prompt:
-            with messages.chat_message("user", avatar=avatar["user"]):
-                st.write(prompt)
-            # Append user message to chat history
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            with messages.chat_message("assistant", avatar=avatar["assistant"]):
-                response = agent(st.session_state.chat_history)
-            # Append assistant response to chat history
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
-            # Check for HTML content and update in-memory state if found
-            html_content = extract_html_from_markdown(response)
-            if html_content:
-                print("Found HTML content, updating in-memory state...")  # Debug print
-                st.session_state.html = html_content
-                st.session_state.html_version += 1
-            st.write(f"HTML Version: {st.session_state.html_version}")
-        
         # Add reset button at the bottom of the sidebar
-        if st.button("New App", type="primary"):
+        if st.button("New App", type="primary", use_container_width=True):
             st.session_state.chat_history = [{"role": "system", "content": system_prompt}]
             st.session_state.html_version = 0
             st.session_state.html = load_default_html()
             st.rerun()
+    with col2:
+        # st.write(f"Welcome, {st.user.name}! 👋")
+        # st.image(st.user.picture, width=50)
+        st.button("Logout", on_click=st.logout, use_container_width=True)
 
-        st.write(f"Welcome, {st.user.name}! 👋")
-        st.image(st.user.picture, width=50)
-        st.button("Logout", on_click=st.logout)
+    # if st.toggle("Debug", value=False):
+    #     st.write(st.session_state.chat_history)
+    #     st.write(st.user)
+# Main content area for HTML rendering
+with st.container():
+    # Add deployment section at the top right
+    col1, col2, col3 = st.columns([1, 2, 1])
+    # Deploy button on the right
+    with col1:
+        if st.button("🐙 Push to GitHub", use_container_width=True):
+            GH_TOKEN = get_github_token(st.user.sub)
+            try:
+                create_new_repo(GH_TOKEN, st.session_state.app_name)
+            except Exception as e:
+                print(f"Error pushing to GitHub: {e}")
+            finally:
+                push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
+    with col3:
+        if st.button("🚀 Deploy App", type="primary", use_container_width=True):
+            try:
+                site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
+                st.session_state.session_id = session_id
+                st.session_state.site_url = site["url"]
+                zip_bytes = zip_from_html_str(st.session_state.html)
+                # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
+                deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
+                # Show success toast with link
+                st.toast(f"✅ Deployment successful! View your app at: [{site['url']}]({site['url']})", icon="🎉")
+            except Exception as e:
+                # Show error toast
+                st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
-        # if st.toggle("Debug", value=False):
-        #     st.write(st.session_state.chat_history)
-        #     st.write(st.user)
-    # Main content area for HTML rendering
-    with st.container():
-        # Add deployment section at the top right
-        col1, col2, col3 = st.columns([1, 2, 1])
-        # Deploy button on the right
-        with col1:
-            if st.button("🐙 Push to GitHub", use_container_width=True):
-                GH_TOKEN = get_github_token(st.user.sub)
-                try:
-                    create_new_repo(GH_TOKEN, st.session_state.app_name)
-                except Exception as e:
-                    print(f"Error pushing to GitHub: {e}")
-                finally:
-                    push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
-        with col3:
-            if st.button("🚀 Deploy App", type="primary", use_container_width=True):
-                try:
-                    site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
-                    st.session_state.session_id = session_id
-                    st.session_state.site_url = site["url"]
-                    zip_bytes = zip_from_html_str(st.session_state.html)
-                    # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
-                    deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
-                    # Show success toast with link
-                    st.toast(f"✅ Deployment successful! View your app at: [{site['url']}]({site['url']})", icon="🎉")
-                except Exception as e:
-                    # Show error toast
-                    st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
-
-        # Show app name and claim url on the left
-        with col2:
-            if "site_url" in st.session_state:
-                st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
-            else:
-                st.markdown(f"**App Name:** {st.session_state.app_name}")
-            if "session_id" in st.session_state:
-                claim_url = make_claim_link(
-                oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
-                oauth_client_secret=st.secrets['NETLIFY_OAUTH_CLIENT_SECRET'],
-                session_id=st.session_state.session_id,
-            )
-                st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
-        
-    # Always render the HTML from session state
-    st.components.v1.html(st.session_state.html, height=480, scrolling=True)
+    # Show app name and claim url on the left
+    with col2:
+        if "site_url" in st.session_state:
+            st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
+        else:
+            st.markdown(f"**App Name:** {st.session_state.app_name}")
+        if "session_id" in st.session_state:
+            claim_url = make_claim_link(
+            oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
+            oauth_client_secret=st.secrets['NETLIFY_OAUTH_CLIENT_SECRET'],
+            session_id=st.session_state.session_id,
+        )
+            st.markdown(f"**Claim the app ➡️:** [Click Here]({claim_url})")
+    
+# Always render the HTML from session state
+st.components.v1.html(st.session_state.html, height=480, scrolling=True)
