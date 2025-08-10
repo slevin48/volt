@@ -345,9 +345,9 @@ else:
     # Main content area for HTML rendering
     with st.container():
         # Add deployment section at the top right
-        col1, col2 = st.columns([3, 1])
+        col1, col2, col3 = st.columns([2, 1, 1])
         # Deploy button on the right
-        with col1:
+        with col2:
             if st.button("🐙 Push to GitHub", use_container_width=True):
                 GH_TOKEN = get_github_token(st.user.sub)
                 try:
@@ -356,7 +356,7 @@ else:
                     print(f"Error pushing to GitHub: {e}")
                 finally:
                     push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
-        with col2:
+        with col3:
             if st.button("🚀 Deploy App", type="primary", use_container_width=True):
                 try:
                     domain = f"{st.session_state.app_name}.netlify.app"
