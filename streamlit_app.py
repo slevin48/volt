@@ -29,6 +29,8 @@ if "app_name" not in st.session_state:
     st.session_state.app_name = '-'.join(coolname.generate())
 if "html" not in st.session_state:
     st.session_state.html = load_default_html()
+if "github" not in st.session_state:
+    st.session_state.github = None
 
 avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
 model = 'gpt-5-nano'
@@ -276,27 +278,29 @@ def chat_stream(chat_history, model=model):
             # yield raw tokens (preserve newlines/markdown)
             yield delta.content
 
+def homepage():
+    st.title("⚡ volt")
+    st.write("Welcome to **volt**! Please authenticate to start using the app.")
+    st.button("Authenticate", on_click=st.login,type="primary")
+    st.write("Made with ❤️ by Volt⚡")
+    col1,col2,col3 = st.columns([1, 1, 1])
+    with col1:
+        st.markdown("[Calculator](https://calculator.vibecoders.studio/)")
+        st.image('img/calculator.png', use_container_width =True)
+    with col2:
+        st.markdown("[Space Invaders](https://spaceinvaders.vibecoders.studio/)")
+        st.image('img/spaceinvaders.png', use_container_width =True)
+    with col3:
+        st.markdown("[Plop](https://plop.vibecoders.studio/)")
+        st.image('img/plop.png', use_container_width =True)
 
 st.logo('img/high-voltage.png')
 
 
 # if not st.user.is_logged_in:
-#     st.title("⚡ volt")
-#     st.write("Welcome to **volt**! Please authenticate to start using the app.")
-#     st.button("Authenticate", on_click=st.login,type="primary")
-#     st.write("Made with ❤️ by Volt⚡")
-#     col1,col2,col3 = st.columns([1, 1, 1])
-#     with col1:
-#         st.markdown("[Calculator](https://calculator.vibecoders.studio/)")
-#         st.image('img/calculator.png', use_container_width =True)
-#     with col2:
-#         st.markdown("[Space Invaders](https://spaceinvaders.vibecoders.studio/)")
-#         st.image('img/spaceinvaders.png', use_container_width =True)
-#     with col3:
-#         st.markdown("[French Learning](https://french.vibecoders.studio/)")
-#         st.image('img/frenchlearning.png', use_container_width =True)
+#     homepage()
 # else:
-    
+        
 # Sidebar for chat interface
 with st.sidebar:
     prompt = st.chat_input("Enter your message here", key="chat_input")
@@ -326,7 +330,7 @@ with st.sidebar:
         st.write(f"HTML Version: {st.session_state.html_version}")
     
 
-    st.text_input("App Name", value=st.session_state.app_name, key="app_name", on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
+    st.text_input("App Name", value=st.session_state.app_name, on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
     
     # col1, col2 = st.columns([1, 1])
     # with col1:
@@ -337,9 +341,7 @@ with st.sidebar:
         st.session_state.html = load_default_html()
         st.rerun()
     # with col2:
-        # st.write(f"Welcome, {st.user.name}! 👋")
-        # st.image(st.user.picture, width=50)
-        # st.button("Logout", on_click=st.logout, use_container_width=True)
+    #     st.button("Logout", on_click=st.logout, use_container_width=True)
 
     # if st.toggle("Debug", value=False):
     #     st.write(st.session_state.chat_history)
@@ -347,9 +349,10 @@ with st.sidebar:
 # Main content area for HTML rendering
 with st.container():
     # Add deployment section at the top right
-    col1, col2 = st.columns([3, 1])
+    # col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col3 = st.columns([3, 1])
     # Deploy button on the right
-    # with col1:
+    # with col2:
     #     if st.button("🐙 Push to GitHub", use_container_width=True):
     #         GH_TOKEN = get_github_token(st.user.sub)
     #         try:
@@ -358,7 +361,9 @@ with st.container():
     #             print(f"Error pushing to GitHub: {e}")
     #         finally:
     #             push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
-    with col2:
+    #             st.toast(f"✅ Pushed changes! View repo: [github.com/{st.user.nickname}/{st.session_state.app_name}](https://github.com/{st.user.nickname}/{st.session_state.app_name})", icon="🎉")
+    #             st.session_state.github = f"https://github.com/{st.user.nickname}/{st.session_state.app_name}"
+    with col3:
         if st.button("🚀 Deploy App", type="primary", use_container_width=True):
             try:
                 domain = f"{st.session_state.app_name}.netlify.app"
@@ -374,17 +379,17 @@ with st.container():
                     st.session_state.session_id = session_id
                 zip_bytes = zip_from_html_str(st.session_state.html)
                 deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
-                st.toast(f"✅ Deployment successful! View your app at: [{site['url']}]({site['url']})", icon="🎉")
+                st.toast(f"✅ Deployment successful! View app: [{site['url']}]({site['url']})", icon="🎉")
             except Exception as e:
                 # Show error toast
                 st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
     # Show app name and claim url on the left
     with col1:
-        if "site_url" in st.session_state:
-            st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
-        else:
-            st.markdown(f"**App Name:** {st.session_state.app_name}")
+        st.markdown(
+            f"**App:** {(f'[{st.session_state.app_name}]({st.session_state.site_url})' if st.session_state.get('site_url') else st.session_state.app_name)}"
+            f"{(f' ([repo]({st.session_state.github}))' if st.session_state.get('github') else '')}"
+        )
         if "session_id" in st.session_state:
             claim_url = make_claim_link(
             oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
