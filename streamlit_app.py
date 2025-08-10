@@ -29,6 +29,8 @@ if "app_name" not in st.session_state:
     st.session_state.app_name = '-'.join(coolname.generate())
 if "html" not in st.session_state:
     st.session_state.html = load_default_html()
+if "github" not in st.session_state:
+    st.session_state.github = None
 
 avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
 model = 'gpt-5'
@@ -276,11 +278,7 @@ def chat_stream(chat_history, model=model):
             # yield raw tokens (preserve newlines/markdown)
             yield delta.content
 
-
-st.logo('img/high-voltage.png')
-
-
-if not st.user.is_logged_in:
+def homepage():
     st.title("⚡ volt")
     st.write("Welcome to **volt**! Please authenticate to start using the app.")
     st.button("Authenticate", on_click=st.login,type="primary")
@@ -295,6 +293,12 @@ if not st.user.is_logged_in:
     with col3:
         st.markdown("[Plop](https://plop.vibecoders.studio/)")
         st.image('img/plop.png', use_container_width =True)
+
+st.logo('img/high-voltage.png')
+
+
+if not st.user.is_logged_in:
+    homepage()
 else:
         
     # Sidebar for chat interface
@@ -356,6 +360,8 @@ else:
                     print(f"Error pushing to GitHub: {e}")
                 finally:
                     push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
+                    st.toast(f"✅ Pushed changes! View repo: [github.com/{st.user.nickname}/{st.session_state.app_name}](https://github.com/{st.user.nickname}/{st.session_state.app_name})", icon="🎉")
+                    st.session_state.github = f"https://github.com/{st.user.nickname}/{st.session_state.app_name}"
         with col3:
             if st.button("🚀 Deploy App", type="primary", use_container_width=True):
                 try:
@@ -372,17 +378,17 @@ else:
                         st.session_state.session_id = session_id
                     zip_bytes = zip_from_html_str(st.session_state.html)
                     deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
-                    st.toast(f"✅ Deployment successful! View your app at: [{site['url']}]({site['url']})", icon="🎉")
+                    st.toast(f"✅ Deployment successful! View app: [{site['url']}]({site['url']})", icon="🎉")
                 except Exception as e:
                     # Show error toast
                     st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
         # Show app name and claim url on the left
         with col1:
-            if "site_url" in st.session_state:
-                st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
-            else:
-                st.markdown(f"**App Name:** {st.session_state.app_name}")
+            st.markdown(
+                f"**App:** {(f'[{st.session_state.app_name}]({st.session_state.site_url})' if st.session_state.get('site_url') else st.session_state.app_name)}"
+                f"{(f' ([repo]({st.session_state.github}))' if st.session_state.get('github') else '')}"
+            )
             if "session_id" in st.session_state:
                 claim_url = make_claim_link(
                 oauth_client_id=st.secrets['NETLIFY_OAUTH_CLIENT_ID'],
