@@ -120,32 +120,28 @@ def http_headers(pat, extra=None):
         h.update(extra)
     return h
 
-def create_site(pat, team_slug, site_name=None, session_id=None, manage_url=None):
-    session_id = session_id or str(uuid.uuid4())
-    payload = {
-        "account_slug": team_slug,         # put site under your team
-        "created_via": "Volt⚡",          # attribution in Netlify UI
-        "session_id": session_id,          # must match claim JWT later
-    }
-    if site_name:
-        payload["name"] = site_name
-    if manage_url:
-        payload["deploy_origin"] = {
-            "name": "Volt⚡",
-            "deploy_links": [
-                {"url": manage_url, "name": "Manage in tool", "primary": True}
-            ],
-        }
+def get_site_by_domain(domain: str):
+    """
+    Look up a Netlify site by its domain. Returns site JSON if found, else None.
+    """
+    r = requests.get(f"{API_BASE}/sites/{domain}", headers=http_headers(pat))
+    if r.status_code == 200:
+        return r.json()
+    return None
 
-    r = requests.post(f"{API_BASE}/sites",
-                      json=payload,
+
+# Separate get and create site logic
+def create_site(team_slug: str, name: str, tool="volt⚡", session_id=None):
+    payload = {"account_slug": team_slug, "name": name, "created_via": tool}
+    if session_id:
+        payload["session_id"] = session_id
+    r = requests.post(f"{API_BASE}/sites", json=payload,
                       headers=http_headers(pat, {"Content-Type": "application/json"}))
     if r.status_code >= 300:
         raise RuntimeError(f"Create site failed: {r.status_code} {r.text}")
 
-    site = r.json()
-    # Useful fields: id, url, admin_url
-    return site, session_id
+    r.raise_for_status()
+    return r.json()
 
 def zip_webpage() -> bytes:
     """
@@ -341,8 +337,6 @@ else:
                 st.session_state.html = load_default_html()
                 st.rerun()
         with col2:
-            # st.write(f"Welcome, {st.user.name}! 👋")
-            # st.image(st.user.picture, width=50)
             st.button("Logout", on_click=st.logout, use_container_width=True)
 
         # if st.toggle("Debug", value=False):
@@ -351,7 +345,7 @@ else:
     # Main content area for HTML rendering
     with st.container():
         # Add deployment section at the top right
-        col1, col2, col3 = st.columns([1, 2, 1])
+        col1, col2 = st.columns([3, 1])
         # Deploy button on the right
         with col1:
             if st.button("🐙 Push to GitHub", use_container_width=True):
@@ -362,23 +356,29 @@ else:
                     print(f"Error pushing to GitHub: {e}")
                 finally:
                     push_to_github(GH_TOKEN, st.user.nickname, st.session_state.app_name)
-        with col3:
+        with col2:
             if st.button("🚀 Deploy App", type="primary", use_container_width=True):
                 try:
-                    site, session_id = create_site(pat, team_slug, site_name=st.session_state.app_name)
-                    st.session_state.session_id = session_id
-                    st.session_state.site_url = site["url"]
+                    domain = f"{st.session_state.app_name}.netlify.app"
+                    site = get_site_by_domain(domain)
+                    if site:
+                        st.session_state.site_url = site["url"]
+                        st.session_state.site_id = site["id"]
+                    else:
+                        session_id = str(uuid.uuid4())
+                        site = create_site(team_slug, st.session_state.app_name, tool="Volt⚡", session_id=session_id)
+                        st.session_state.site_url = site["url"]
+                        st.session_state.site_id = site["id"]
+                        st.session_state.session_id = session_id
                     zip_bytes = zip_from_html_str(st.session_state.html)
-                    # deploy = deploy_zip_zipmethod(pat, site["id"], zip_bytes)
                     deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
-                    # Show success toast with link
                     st.toast(f"✅ Deployment successful! View your app at: [{site['url']}]({site['url']})", icon="🎉")
                 except Exception as e:
                     # Show error toast
                     st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
 
         # Show app name and claim url on the left
-        with col2:
+        with col1:
             if "site_url" in st.session_state:
                 st.markdown(f"**App Name:** [{st.session_state.app_name}]({st.session_state.site_url})")
             else:
