@@ -1,7 +1,13 @@
 import streamlit as st
 import openai, re, io, time, uuid, zipfile, jwt, requests, coolname, base64
 
-st.set_page_config(page_title="volt", page_icon="⚡")
+st.set_page_config(page_title="volt", page_icon="⚡",
+                   menu_items={
+                        'Get Help': "mailto:slevin.an209@gadz.org",
+                        'Report a bug': "https://github.com/slevin48/volt/issues",
+                        'About': "Create and deploy HTML apps with AI. Made with ❤️ by vibecoders.studio⚡"
+                    }
+                )
 openai.api_key=st.secrets['OPENAI_API_KEY']
 pat = st.secrets['NETLIFY_PAT']
 team_slug = st.secrets['NETLIFY_TEAM_SLUG']
