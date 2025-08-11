@@ -284,6 +284,11 @@ def chat_stream(chat_history, model=model):
             # yield raw tokens (preserve newlines/markdown)
             yield delta.content
 
+def fmt_duration(s: float) -> str:
+    # simple "Xm Ys" formatter
+    m, sec = divmod(int(s), 60)
+    return f"{m}m {sec}s" if m else f"{sec}s"
+
 def homepage():
     st.title("⚡ volt")
     st.write("Welcome to **volt**! Please authenticate to start using the app.")
@@ -319,12 +324,91 @@ else:
                 
         # Process user input
         if prompt:
+            # Echo user
             with messages.chat_message("user", avatar=avatar["user"]):
                 st.write(prompt)
             # Append user message to chat history
             st.session_state.chat_history.append({"role": "user", "content": prompt})
+            # Assistant UI: show a live "Reasoning…" status on top, stream answer below
             with messages.chat_message("assistant", avatar=avatar["assistant"]):
-                response = st.write_stream(chat_stream(st.session_state.chat_history))
+                # response = st.write_stream(chat_stream(st.session_state.chat_history))
+                thinking_container = st.container()
+                answer_container = st.container()
+
+                final_holder = {}
+                timing = {"overall_start": None, "overall_end": None,
+                        "reason_start": None, "reason_end": None}
+
+                with thinking_container:
+                    with st.status("Reasoning…", state="running", expanded=True) as status:
+                        thinking_placeholder = st.empty()
+
+                        def answer_stream_gen():
+                            """
+                            Iterate the Responses API stream once:
+                            - yield answer chunks for st.write_stream
+                            - update the status box with reasoning deltas
+                            - capture timing and final response
+                            """
+                            timing["overall_start"] = time.time()
+                            reasoning_buf = []
+
+                            # Assumes you initialized `client = OpenAI(...)` earlier
+                            with openai.responses.stream(
+                                model=model,
+                                input=st.session_state.chat_history,
+                                reasoning={
+                                    "effort": "medium",
+                                    "summary": "auto"
+                                            },
+                            ) as stream:
+                                for event in stream:
+                                    et = event.type
+
+                                    # Final answer chunks
+                                    if et == "response.output_text.delta":
+                                        yield event.delta or ""
+
+                                    # Reasoning summary chunks (provider-safe)
+                                    elif et in ("response.reasoning_summary_text.delta",
+                                                "response.reasoning_summary.delta"):
+                                        if timing["reason_start"] is None:
+                                            timing["reason_start"] = time.time()
+                                        delta = getattr(event, "delta", "") or ""
+                                        reasoning_buf.append(delta)
+                                        thinking_placeholder.markdown("".join(reasoning_buf))
+
+                                    # Reasoning window done
+                                    elif et == "response.reasoning_summary_text.done":
+                                        if timing["reason_end"] is None:
+                                            timing["reason_end"] = time.time()
+
+                                    # Optional: surface refusals
+                                    elif et == "response.refusal.delta":
+                                        thinking_placeholder.markdown(
+                                            "⚠️ The model refused: " + (event.delta or "")
+                                        )
+
+                                # Capture final response & close timing
+                                final_holder["resp"] = stream.get_final_response()
+                                timing["overall_end"] = time.time()
+                                if timing["reason_start"] is not None and timing["reason_end"] is None:
+                                    timing["reason_end"] = timing["overall_end"]
+
+                        # Stream the assistant message (below the status box)
+                        with answer_container:
+                            response = st.write_stream(answer_stream_gen())
+
+                        # Close the status with elapsed time
+                        if timing["reason_start"] and timing["reason_end"]:
+                            elapsed = timing["reason_end"] - timing["reason_start"]
+                            label = f"Thought for {fmt_duration(elapsed)}"
+                        elif timing["overall_start"] and timing["overall_end"]:
+                            elapsed = timing["overall_end"] - timing["overall_start"]
+                            label = f"Responded in {fmt_duration(elapsed)}"
+                        else:
+                            label = "Done."
+                        status.update(label=label, state="complete", expanded=False)
             # Append assistant response to chat history
             st.session_state.chat_history.append({"role": "assistant", "content": response})
             # Check for HTML content and update in-memory state if found
@@ -334,9 +418,6 @@ else:
                 st.session_state.html = html_content
                 st.session_state.html_version += 1
             st.write(f"HTML Version: {st.session_state.html_version}")
-        
-
-        st.text_input("App Name", value=st.session_state.app_name, key="app_name", on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
         
         col1, col2 = st.columns([1, 1])
         with col1:
