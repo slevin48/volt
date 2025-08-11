@@ -12,6 +12,9 @@ openai.api_key=st.secrets['OPENAI_API_KEY']
 pat = st.secrets['NETLIFY_PAT']
 team_slug = st.secrets['NETLIFY_TEAM_SLUG']
 API_BASE = "https://api.netlify.com/api/v1"
+avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
+model = 'gpt-5-nano'
+AUTH0_DOMAIN = st.secrets["auth"]["domain"]
 
 # Import system prompt from file
 with open('system_prompt.md', 'r', encoding='utf-8') as f:
@@ -41,10 +44,14 @@ if "html" not in st.session_state:
     st.session_state.html = load_default_html()
 if "github" not in st.session_state:
     st.session_state.github = None
+if "is_deploying" not in st.session_state:
+    st.session_state.is_deploying = False
+if "flash" not in st.session_state:
+    st.session_state.flash = []
 
-avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
-model = 'gpt-5-nano'
-AUTH0_DOMAIN = st.secrets["auth"]["domain"]
+def flash(msg: str, kind: str = "success", balloons: bool = False):
+    st.session_state.flash.append({"msg": msg, "kind": kind, "balloons": balloons})
+
 
 def commit_app_name():
     name = st.session_state.app_name_input.strip()
@@ -317,6 +324,15 @@ def homepage():
 
 st.logo('img/high-voltage.png')
 
+# Show queued notifications from the previous run
+if st.session_state.flash:
+    for n in st.session_state.flash:
+        icon = {"success": "🎉", "error": "⚠️", "info": "ℹ️"}.get(n["kind"], "ℹ️")
+        st.toast(n["msg"], icon=icon)
+        if n.get("balloons"):
+            st.balloons()
+    st.session_state.flash.clear()
+
 
 # if not st.user.is_logged_in:
 #     homepage()
@@ -486,25 +502,61 @@ with st.container():
     #             st.toast(f"✅ Pushed changes! View repo: [github.com/{st.user.nickname}/{st.session_state.app_name}](https://github.com/{st.user.nickname}/{st.session_state.app_name})", icon="🎉")
     #             st.session_state.github = f"https://github.com/{st.user.nickname}/{st.session_state.app_name}"
     with col3:
-        if st.button("🚀 Deploy App", type="primary", use_container_width=True):
-            try:
-                domain = f"{st.session_state.app_name}.netlify.app"
-                site = get_site_by_domain(domain)
-                if site:
-                    st.session_state.site_url = site["url"]
-                    st.session_state.site_id = site["id"]
-                else:
-                    session_id = str(uuid.uuid4())
-                    site = create_site(team_slug, st.session_state.app_name, tool="Volt⚡", session_id=session_id)
-                    st.session_state.site_url = site["url"]
-                    st.session_state.site_id = site["id"]
-                    st.session_state.session_id = session_id
-                zip_bytes = zip_from_html_str(st.session_state.html)
-                deploy = deploy_zip_buildapi(pat, site["id"], zip_bytes)
-                st.toast(f"✅ Deployment successful! View app: [{site['url']}]({site['url']})", icon="🎉")
-            except Exception as e:
-                # Show error toast
-                st.toast(f"❌ Deployment failed: {str(e)}", icon="⚠️")
+        slot = st.empty()
+
+        if not st.session_state.is_deploying:
+            if slot.button("🚀 Deploy App", type="primary", use_container_width=True):
+                st.session_state.is_deploying = True
+                st.rerun()
+        else:
+            with slot.container():
+                with st.spinner("Deploying App 🚀"):
+                    try:
+                        # Ensure site exists
+                        domain = f"{st.session_state.app_name}.netlify.app"
+                        site = get_site_by_domain(domain)
+                        if site:
+                            st.session_state.site_url = site["url"]
+                            st.session_state.site_id = site["id"]
+                        else:
+                            session_id = str(uuid.uuid4())
+                            site = create_site(team_slug, st.session_state.app_name, tool="Volt⚡", session_id=session_id)
+                            st.session_state.site_url = site["url"]
+                            st.session_state.site_id = site["id"]
+                            st.session_state.session_id = session_id
+
+                        # Start Build API deploy
+                        zip_bytes = zip_from_html_str(st.session_state.html)
+                        build = deploy_zip_buildapi(
+                            pat,
+                            st.session_state.site_id,
+                            zip_bytes,
+                            title=f"Volt deploy v{st.session_state.html_version}"
+                        )
+
+                        # Extract deploy_id and poll
+                        deploy_id = (
+                            build.get("deploy_id")
+                            or build.get("deployId")
+                            or (build.get("deploy", {}) or {}).get("id")
+                        )
+                        if not deploy_id:
+                            raise RuntimeError(f"Build API response missing deploy_id: {build}")
+
+                        ready = poll_deploy_ready(pat, deploy_id, timeout_s=240, interval_s=3)
+                        st.session_state.site_url = ready.get("url", st.session_state.site_url)
+
+                        # Queue success UI for next run
+                        flash(f"✅ Deployment ready! View app: {st.session_state.site_url}", "success", balloons=True)
+
+                    except Exception as e:
+                        # Queue failure UI for next run
+                        flash(f"❌ Deployment failed: {e}", "error", balloons=False)
+
+                    finally:
+                        st.session_state.is_deploying = False
+                        st.rerun()
+
 
     # Show app name and claim url on the left
     with col1:
