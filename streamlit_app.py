@@ -314,6 +314,7 @@ else:
         
     # Sidebar for chat interface
     with st.sidebar:
+        st.text_input("App Name", value=st.session_state.app_name, on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
         prompt = st.chat_input("Enter your message here", key="chat_input")
         messages = st.container(height=450)
         # Display chat history
