@@ -33,6 +33,10 @@ if "html_version" not in st.session_state:
     st.session_state.html_version = 0
 if "app_name" not in st.session_state:
     st.session_state.app_name = '-'.join(coolname.generate())
+if "app_name_editing" not in st.session_state:
+    st.session_state.app_name_editing = False
+if "app_name_input" not in st.session_state:
+    st.session_state.app_name_input = st.session_state.app_name
 if "html" not in st.session_state:
     st.session_state.html = load_default_html()
 if "github" not in st.session_state:
@@ -41,6 +45,12 @@ if "github" not in st.session_state:
 avatar = {'user': '⚡', 'assistant': '🤖', 'system': '🔧'}
 model = 'gpt-5'
 AUTH0_DOMAIN = st.secrets["auth"]["domain"]
+
+def commit_app_name():
+    name = st.session_state.app_name_input.strip()
+    if name:
+        st.session_state.app_name = name
+    st.session_state.app_name_editing = False
 
 def zip_from_html_str(html_str: str) -> bytes:
     buf = io.BytesIO()
@@ -314,7 +324,29 @@ else:
         
     # Sidebar for chat interface
     with st.sidebar:
-        st.text_input("App Name", value=st.session_state.app_name, on_change=lambda: setattr(st.session_state, 'app_name', st.session_state.app_name))
+        st.caption("App Name")
+        c1, c2 = st.columns([1, 0.2])
+        with c2:
+            label = "Save" if st.session_state.app_name_editing else "Edit"
+            if st.button(label, use_container_width=True, key="app_name_toggle"):
+                if st.session_state.app_name_editing:
+                    commit_app_name()
+                else:
+                    # enter edit mode BEFORE the input is instantiated
+                    st.session_state.app_name_input = st.session_state.app_name
+                    st.session_state.app_name_editing = True
+                    st.rerun()
+
+        with c1:
+            st.text_input(
+                "App Name",
+                key="app_name_input",
+                label_visibility="collapsed",  # aligns with the button
+                disabled=not st.session_state.app_name_editing,
+                on_change=commit_app_name,        # Enter to save
+                placeholder="Name your app…",
+            )
+            
         prompt = st.chat_input("Enter your message here", key="chat_input")
         messages = st.container(height=450)
         # Display chat history
