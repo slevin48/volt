@@ -325,12 +325,13 @@ else:
     # Sidebar for chat interface
     with st.sidebar:
         st.caption("App Name")
-        c1, c2 = st.columns([1, 0.2])
+        c1, c2 = st.columns([5, 1])
         with c2:
-            label = "Save" if st.session_state.app_name_editing else "Edit"
+            label = "💾" if st.session_state.app_name_editing else "✏️"
             if st.button(label, use_container_width=True, key="app_name_toggle"):
                 if st.session_state.app_name_editing:
                     commit_app_name()
+                    st.rerun()
                 else:
                     # enter edit mode BEFORE the input is instantiated
                     st.session_state.app_name_input = st.session_state.app_name
